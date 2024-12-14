@@ -1,12 +1,7 @@
 use clap::Parser;
-use itertools::{concat, Itertools};
-use rayon::iter::*;
-use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
-use std::sync::Arc;
-use std::time::{self, Duration};
-use std::{fs, thread};
+use itertools::Itertools;
+use std::collections::HashSet;
+use std::{time, fs};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about=None)]
@@ -48,22 +43,6 @@ impl Direction {
         }
     }
 }
-struct Fence {
-    pieces: Vec<FencePiece>,
-}
-
-struct FencePiece {
-    pos_0: usize,
-    pos_1: usize,
-    ori: FenceOrientation,
-    type_0: char,
-    type_1: char,
-}
-
-enum FenceOrientation {
-    V,
-    H,
-}
 
 struct CropGrid {
     tiles: Vec<Vec<char>>,
@@ -88,29 +67,116 @@ impl CropGrid {
 
         while !neighbors.is_empty() {
             set.extend(&neighbors);
-            println!(
-                "neighbors len: {:?}, set len: {:?}",
-                neighbors.len(),
-                set.len()
-            );
+            // println!(
+            //     "neighbors len: {:?}, set len: {:?}",
+            //     neighbors.len(),
+            //     set.len()
+            // );
             neighbors = neighbors
                 .into_iter()
                 .flat_map(|(i, j)| self.neighbors_of(i, j, *c))
                 .unique()
                 .filter(|(i, j)| !set.contains(&(*i, *j)))
                 .collect();
-            // println!("{:?}", neighbors.iter().map(|(i, j)| set.contains(&(*i, *j))).collect::<Vec<bool>>());
-            // thread::sleep(Duration::from_secs(1));
+        }
+
+        set
+    }
+    fn find_anti_region_of(
+        &self,
+        i: usize,
+        j: usize,
+        existing_region: &HashSet<(usize, usize)>,
+    ) -> HashSet<(usize, usize)> {
+        let mut set = HashSet::<(usize, usize)>::new();
+        set.insert((i, j));
+
+        let mut neighbors = self.neighbors_of_anti(i, j, existing_region);
+
+        while !neighbors.is_empty() {
+            set.extend(&neighbors);
+            // println!(
+            //     "neighbors len: {:?}, set len: {:?}",
+            //     neighbors.len(),
+            //     set.len()
+            // );
+            neighbors = neighbors
+                .into_iter()
+                .flat_map(|(i, j)| self.neighbors_of_anti(i, j, existing_region))
+                .unique()
+                .filter(|(i, j)| !set.contains(&(*i, *j)))
+                .collect();
         }
 
         set
     }
 
+    fn find_diag_anti_region_of(
+        &self,
+        i: usize,
+        j: usize,
+        existing_region: &HashSet<(usize, usize)>,
+    ) -> HashSet<(usize, usize)> {
+        let mut set = HashSet::<(usize, usize)>::new();
+        set.insert((i, j));
+
+        let mut neighbors = self.neighbors_including_diag_of(i, j, existing_region);
+
+        while !neighbors.is_empty() {
+            set.extend(&neighbors);
+            // println!(
+            //     "neighbors len: {:?}, set len: {:?}",
+            //     neighbors.len(),
+            //     set.len()
+            // );
+            neighbors = neighbors
+                .into_iter()
+                .flat_map(|(i, j)| self.neighbors_including_diag_of(i, j, existing_region))
+                .unique()
+                .filter(|(i, j)| !set.contains(&(*i, *j)))
+                .collect();
+        }
+
+        set
+    }
     fn neighbors_of(&self, i: usize, j: usize, c: char) -> Vec<(usize, usize)> {
         [(i + 1, j), (i, j + 1), (i - 1, j), (i, j - 1)]
             .into_iter()
             .filter(|(i, j)| self.get_2d(*i, *j) == Some(&c))
             .collect()
+    }
+
+    fn neighbors_of_anti(
+        &self,
+        i: usize,
+        j: usize,
+        existing_region: &HashSet<(usize, usize)>,
+    ) -> Vec<(usize, usize)> {
+        [(i + 1, j), (i, j + 1), (i - 1, j), (i, j - 1)]
+            .into_iter()
+            .filter(|(i, j)| self.get_2d(*i, *j).is_some() && !existing_region.contains(&(*i, *j)))
+            .collect()
+    }
+
+    fn neighbors_including_diag_of(
+        &self,
+        i: usize,
+        j: usize,
+        existing_region: &HashSet<(usize, usize)>,
+    ) -> Vec<(usize, usize)> {
+        [
+            (i + 1, j),
+            (i, j + 1),
+            (i - 1, j),
+            (i, j - 1),
+            (i - 1, j - 1),
+            (i + 1, j - 1),
+            (i - 1, j + 1),
+            (i + 1, j + 1),
+        ]
+        .into_iter()
+        .filter(|(i, j)| self.get_2d(*i, *j).is_some() && !existing_region.contains(&(*i, *j)))
+        .collect()
     }
 
     fn get_perimeter_length(&self, region: &HashSet<(usize, usize)>) -> usize {
@@ -123,94 +189,77 @@ impl CropGrid {
         result
     }
 
-    fn get_perimeter_contribution(&self, i: &usize, j: &usize) -> usize {
-        let c = self.get_2d(*i, *j).unwrap();
-        4 - self.neighbors_of(*i, *j, *c).len()
-    }
-
     fn get_number_of_sides(&self, region: &HashSet<(usize, usize)>) -> usize {
-        let mut sides = 1;
-        let region_edges = region
-            .iter()
-            .filter(|(i, j)| self.get_perimeter_contribution(i, j) > 0);
-        let region_edges = region_edges
-            .filter(|(i, j)| !coords_almost_inside(i, j, region))
-            .collect_vec();
-
-        println!(
-            "region edges {:?}",
-            region
-                .iter()
-                .filter(|(i, j)| !coords_almost_inside(i, j, region))
-                .collect_vec()
-        );
+        let mut sides = 0;
+        let region_edges = region;
+        // .iter()
+        // .filter(|(i, j)| self.get_perimeter_contribution(i, j) > 0);
+        // let region_edges = region_edges.collect_vec();
         let (i, j) = get_top_left(region);
         let mut dir = Direction::Down;
-
         let (mut current_i, mut current_j) = (i, j);
+        let mut visited = HashSet::<((usize, usize), Direction)>::new();
 
-        let mut visited = HashSet::<(usize, usize)>::new();
+        while {
+            let t = visited.insert(((current_i, current_j), dir));
+            // if !t {
+            //     println!("found ({:?},{:?}), {:?} in map", current_i, current_j, dir);
+            // };
+            t
+        } {
+            // thread::sleep(Duration::from_millis(100));
+            // println!(
+            //     "[{:?}] moving from ({:?}, {:?}), dir: {:?}",
+            //     c, current_i, current_j, dir
+            // );
 
-        while visited.len() != region_edges.len() {
-            println!(
-                "visited len: {:?}, edges len: {:?}",
-                visited.len(),
-                region_edges.len()
+            let going_forward = move_from((current_i, current_j), dir);
+            let going_right = move_from((current_i, current_j), dir.rotate_right_90());
+            let going_left = move_from((current_i, current_j), dir.rotate_left_90());
+            let going_backward = move_from(
+                (current_i, current_j),
+                dir.rotate_left_90().rotate_left_90(),
             );
-            visited.insert((current_i, current_j));
-            thread::sleep(Duration::from_millis(100));
-            println!(
-                "moving from ({:?}, {:?}), dir: {:?}",
-                current_i, current_j, dir
-            );
-            let (next_i, next_j) = move_from((current_i, current_j), dir);
-            if !region_edges.contains(&&(next_i, next_j)) {
-                let going_right = move_from((current_i, current_j), dir.rotate_right_90());
-                let going_left = move_from((current_i, current_j), dir.rotate_left_90());
-                if region_edges.contains(&&going_left) && region_edges.contains(&&going_right) {
-                    if visited.contains(&going_left) {
-                        dir = dir.rotate_right_90();
-                        sides += 1;
-                    } else if visited.contains(&&going_right) {
-                        dir = dir.rotate_left_90();
-                        sides += 1;
-                    } else {
-                        panic!(
-                            "found both places to go from ({:?}, {:?}), dir: {:?}",
-                            next_i, next_j, dir
-                        )
-                    };
-                    continue;
-                }
-                if region_edges.contains(&&going_left) {
-                    dir = dir.rotate_left_90();
+
+            if region_edges.contains(&&going_right)
+                && !visited.contains(&(going_right, dir.rotate_right_90()))
+            {
+                dir = dir.rotate_right_90();
+                (current_i, current_j) = going_right;
+                sides += 1;
+            } else if region_edges.contains(&&going_forward)
+                && !visited.contains(&(going_forward, dir))
+            {
+                (current_i, current_j) = going_forward;
+            } else if region_edges.contains(&&going_left)
+                && !visited.contains(&(going_left, dir.rotate_left_90()))
+            {
+                dir = dir.rotate_left_90();
+                (current_i, current_j) = going_left;
+                sides += 1;
+            } else if region_edges.contains(&&going_backward) {
+                if visited.contains(&((current_i, current_j), dir.rotate_left_90())) {
                     sides += 1;
-                    continue;
-                } else if region_edges.contains(&&going_right) {
-                    {
-                        dir = dir.rotate_left_90();
-                        sides += 1;
-                        continue;
-                    };
-                } else {
-                    dir = dir.rotate_left_90().rotate_left_90();
-                    sides += 2;
+                    break;
                 }
+                dir = dir.rotate_right_90().rotate_right_90();
+                sides += 2;
             } else {
-                (current_i, current_j) = (next_i, next_j);
+                sides = 4;
+                break;
             }
         }
-        println!("sides found: {:?}", sides);
+        // println!("sides found for {:?}: {:?}", c, sides);
         sides
     }
 }
 
 fn move_from(p: (usize, usize), d: Direction) -> (usize, usize) {
     match d {
-        Direction::Up => (p.0, p.1 - 1),
-        Direction::Right => (p.0 + 1, p.1),
-        Direction::Down => (p.0, p.1 + 1),
-        Direction::Left => (p.0 - 1, p.1),
+        Direction::Up => (p.0 - 1, p.1),
+        Direction::Right => (p.0, p.1 + 1),
+        Direction::Down => (p.0 + 1, p.1),
+        Direction::Left => (p.0, p.1 - 1),
     }
 }
 fn main() {
@@ -250,39 +299,40 @@ fn part1(grid: &CropGrid) -> usize {
         .sum()
 }
 
-fn part1_(grid: &CropGrid) -> usize {
-    let mut fence_pieces = Vec::<FencePiece>::new();
-    let mut fences = Vec::<Fence>::new();
-    for (i, line) in grid.tiles.iter().enumerate() {
-        for (j, tile) in line.iter().enumerate() {
-            let right_tile = grid.get_2d(i, j + 1);
-            let down_tile = grid.get_2d(i + 1, j);
-            if Some(tile) != right_tile {
-                fence_pieces.push(FencePiece {
-                    pos_0: j,
-                    pos_1: j + 1,
-                    ori: FenceOrientation::V,
-                    type_0: *tile,
-                    type_1: *right_tile.unwrap(),
-                });
-            } else if Some(tile) != down_tile {
-                fence_pieces.push(FencePiece {
-                    pos_0: i,
-                    pos_1: i + 1,
-                    ori: FenceOrientation::H,
-                    type_0: *tile,
-                    type_1: *down_tile.unwrap(),
-                });
-            }
-        }
-    }
-    1
-}
 fn get_top_left(region: &HashSet<(usize, usize)>) -> (usize, usize) {
     *region
         .iter()
         .min_by(|&&(x1, y1), &&(x2, y2)| (x1, y1).cmp(&(x2, y2)))
         .unwrap()
+}
+
+fn region_is_inside(
+    inside_region: &HashSet<(usize, usize)>,
+    outside_region: &HashSet<(usize, usize)>,
+) -> bool {
+    inside_region.iter().all(|(i, j)| {
+        let on_same_horizontal = outside_region.iter().filter(|(i2, _)| i == i2);
+        let on_same_vertical = outside_region.iter().filter(|(_, j2)| j == j2);
+
+        on_same_vertical.clone().find(|(i2, _)| i2 > i).is_some()
+            && on_same_horizontal.clone().find(|(_, j2)| j2 > j).is_some()
+            && on_same_vertical.clone().find(|(i2, _)| i2 < i).is_some()
+            && on_same_horizontal.clone().find(|(_, j2)| j2 < j).is_some()
+    })
+}
+
+fn is_fully_contained(
+    inside_region: &HashSet<(usize, usize)>,
+    outside_region: &HashSet<(usize, usize)>,
+    grid: &CropGrid,
+) -> bool {
+    let (i, j) = inside_region.iter().next().unwrap();
+    let greedy_region = grid.find_diag_anti_region_of(*i, *j, outside_region);
+    println!(
+        "greedy region found for this anti region: length {:?}",
+        greedy_region.len()
+    );
+    region_is_inside(&greedy_region, outside_region)
 }
 
 fn part2(grid: &CropGrid) -> usize {
@@ -299,69 +349,73 @@ fn part2(grid: &CropGrid) -> usize {
             }
         }
     }
-    println!("finding sides...");
 
-    let mut sides_numbers = regions
+    let outside_sides_numbers = regions
         .iter()
         .map(|r| (r, grid.get_number_of_sides(r)))
         .collect_vec();
 
-    let s2 = sides_numbers.clone();
-    for (region, mut n) in sides_numbers.iter_mut() {
-        for (inside_region, n2) in s2.iter() {
-            if region_is_inside(inside_region, region) {
-                n += n2;
+    let mut total_sides_numbers = Vec::<(&HashSet<(usize, usize)>, usize)>::new();
+
+    for (outside_region, n) in outside_sides_numbers.iter() {
+        let (first_i, first_j) = outside_region.iter().next().unwrap();
+        let c = grid.get_2d(*first_i, *first_j).unwrap();
+        let inside_tiles = regions
+            .iter()
+            .filter(|inside_region| {
+                inside_region != outside_region && region_is_inside(inside_region, outside_region)
+            })
+            .flat_map(|r| r.iter().collect_vec())
+            .collect::<Vec<&(usize, usize)>>();
+
+        if !inside_tiles.is_empty() {
+            println!("{:?} tiles found inside {c}", inside_tiles.len());
+        }
+        let mut anti_regions = Vec::<HashSet<(usize, usize)>>::new();
+        for (i, j) in inside_tiles {
+            // let diff_c = grid.get_2d(*i, *j).unwrap();
+            // println!("checking inside tile ({i}, {j}) [{diff_c}]");
+            if !anti_regions.iter().any(|v| v.contains(&(*i, *j))) {
+                let anti_region = grid.find_anti_region_of(*i, *j, &outside_region);
+                println!(
+                    "found anti-region of size: {:?} inside region {c} with {:?} sides",
+                    anti_region.len(),
+                    grid.get_number_of_sides(&anti_region)
+                );
+                if !region_is_inside(&anti_region, outside_region) {
+                    println!("but anti region extends past boundaries of outside region (maybe the outside region is not closed), so this anti region is invalid");
+                    continue;
+                }
+                if !is_fully_contained(&anti_region, outside_region, &grid) {
+                    println!("region was not fully contained, so the inside edges of the outside region are probably already counted.");
+                    continue;
+                }
+                assert!(anti_regions
+                    .iter()
+                    .all(|existing_region| anti_region.is_disjoint(existing_region)));
+                anti_regions.push(anti_region);
             }
         }
+        total_sides_numbers.push((
+            outside_region,
+            n + anti_regions
+                .into_iter()
+                .map(|r| grid.get_number_of_sides(&r))
+                .sum::<usize>(),
+        ));
     }
-    sides_numbers.iter().map(|(r, n)| r.len() * n).sum()
-}
 
-fn coords_inside(i: &usize, j: &usize, outside_region: &HashSet<(usize, usize)>) -> bool {
-    region_is_inside(&HashSet::from([(*i, *j)]), outside_region)
-}
+    total_sides_numbers.iter().for_each(|(r, n)| {
+        let (i, j) = r.iter().next().unwrap();
 
-fn coords_almost_inside(i: &usize, j: &usize, outside_region: &HashSet<(usize, usize)>) -> bool {
-    region_almost_inside(&HashSet::from([(*i, *j)]), outside_region)
-}
-fn region_is_inside(
-    inside_region: &HashSet<(usize, usize)>,
-    outside_region: &HashSet<(usize, usize)>,
-) -> bool {
-    inside_region.iter().all(|(i, j)| {
-        let on_same_horizontal = outside_region.iter().filter(|(i2, _)| i == i2);
-        let on_same_vertical = outside_region.iter().filter(|(_, j2)| j == j2);
-
-        on_same_vertical
-            .clone()
-            .find_or_first(|(i2, _)| i2 > i)
-            .is_some()
-            && on_same_horizontal
-                .clone()
-                .find_or_first(|(_, j2)| j2 > j)
-                .is_some()
-            && on_same_vertical.find_or_first(|(i2, _)| i2 < i).is_some()
-            && on_same_horizontal.find_or_first(|(_, j2)| j2 < j).is_some()
-    })
-}
-
-fn region_almost_inside(
-    inside_region: &HashSet<(usize, usize)>,
-    outside_region: &HashSet<(usize, usize)>,
-) -> bool {
-    inside_region.iter().all(|(i, j)| {
-        let on_same_horizontal = outside_region.iter().filter(|(i2, _)| i == i2);
-        let on_same_vertical = outside_region.iter().filter(|(_, j2)| j == j2);
-
-        on_same_vertical
-            .clone()
-            .find_or_first(|(i2, _)| i2 >= i)
-            .is_some()
-            && on_same_horizontal
-                .clone()
-                .find_or_first(|(_, j2)| j2 >= j)
-                .is_some()
-            && on_same_vertical.find_or_first(|(i2, _)| i2 <= i).is_some()
-            && on_same_horizontal.find_or_first(|(_, j2)| j2 <= j).is_some()
-    })
+        let c = grid.get_2d(*i, *j);
+        println!(
+            "{:?}: {:?} sides * {:?} len = {:?}",
+            c,
+            n,
+            r.len(),
+            r.len() * n
+        );
+    });
+    total_sides_numbers.iter().map(|(r, n)| r.len() * n).sum()
 }
