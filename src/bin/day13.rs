@@ -1,8 +1,11 @@
 use clap::Parser;
 use itertools::Itertools;
+use num_bigint::BigInt;
+use num_rational::BigRational;
 use regex::Regex;
 use rust_decimal::{prelude::FromPrimitive, Decimal};
-use std::{fs, time};
+use rust_decimal_macros::dec;
+use std::{fs, str::FromStr, time};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about=None)]
@@ -104,26 +107,105 @@ impl ClawProblem {
         println!("det: {:?}", mat.det());
 
         if mat.det() != Decimal::from_u8(0).unwrap() {
-            return self.solve_p2();
+            let a = BigInt::from_str(mat.0 .0.to_string().as_str()).unwrap();
+            println!("a: {:?}", a);
+            let b = BigInt::from_str(mat.0 .1.to_string().as_str()).unwrap();
+            println!("b: {:?}", b);
+            let c = BigInt::from_str(mat.1 .0.to_string().as_str()).unwrap();
+            println!("c: {:?}", c);
+            let d = BigInt::from_str(mat.1 .1.to_string().as_str()).unwrap();
+            println!("d: {:?}", d);
+            let e = BigInt::from_str(target.0.to_string().as_str()).unwrap();
+            println!("e: {:?}", e);
+            let f = BigInt::from_str(target.1.to_string().as_str()).unwrap();
+            println!("f: {:?}", f);
+
+            let d_minus_bc_over_a = BigRational::from_integer(d.clone())
+                - BigRational::new(b.clone() * c.clone(), a.clone());
+
+            let f_minus_ce_over_a = BigRational::from_integer(f.clone())
+                - BigRational::new(c.clone() * e.clone(), a.clone());
+
+            let unique_solution_b = f_minus_ce_over_a / d_minus_bc_over_a;
+
+            let unique_solution_a = (BigRational::from_integer(e.clone())
+                - BigRational::from_integer(b.clone()) * unique_solution_b.clone())
+                / a.clone();
+
+            println!(
+                "unique solution: ({:?})A + ({:?})B",
+                unique_solution_a, unique_solution_b
+            );
+
+            if !(unique_solution_a.is_integer() && unique_solution_b.is_integer()) {
+                println!("no integer solution");
+                return None;
+            }
+            let unique_solution_a = unique_solution_a.numer();
+            let unique_solution_b = unique_solution_b.numer();
+
+            // let d_minus_bc_over_a = mat.1 .1 - ((mat.0 .1 * mat.1 .0) / mat.0 .0);
+            // let f_minus_ce_over_a = target.1 - ((mat.1 .0 * target.0) / mat.0 .0);
+
+            // let unique_solution_b = f_minus_ce_over_a / d_minus_bc_over_a;
+            // let unique_solution_a = (target.0 - (mat.0 .1 * unique_solution_b)) / mat.0 .0;
+
+            // let tokens = unique_solution_a * Decimal::from_u8(3).unwrap() + unique_solution_b;
+            let tokens: BigInt = unique_solution_a * 3 + unique_solution_b;
+            println!("=> {:?} tokens", tokens);
+            return Some(Decimal::from_str(tokens.to_string().as_str()).unwrap());
         };
 
-        let v = if vb.s_mul(Decimal::from_u8(3).unwrap()).0 > va.0 {
-            va
+        let one_vector_only_solution_using_a = Vecf2d(target.0 / va.0, target.1 / va.1).0;
+        let one_vector_only_solution_using_b = Vecf2d(target.0 / vb.0, target.1 / vb.1).0;
+
+        println!("o_v_o_s_u_a: {:?}", one_vector_only_solution_using_a);
+        println!("o_v_o_s_u_b: {:?}", one_vector_only_solution_using_b);
+
+        let min_tokens = if one_vector_only_solution_using_b.is_integer()
+            && one_vector_only_solution_using_a.is_integer()
+        {
+            if one_vector_only_solution_using_b < dec!(3) * one_vector_only_solution_using_a {
+                println!(
+                    "only multiplying B by {:?}",
+                    one_vector_only_solution_using_b
+                );
+                Some(one_vector_only_solution_using_b)
+            } else {
+                println!(
+                    "only multiplying A by {:?}",
+                    one_vector_only_solution_using_a
+                );
+                Some(one_vector_only_solution_using_a * dec!(3))
+            }
         } else {
-            vb
+            if one_vector_only_solution_using_a.is_integer() {
+                println!(
+                    "only multiplying A by {:?}",
+                    one_vector_only_solution_using_a
+                );
+                Some(one_vector_only_solution_using_a * dec!(3))
+            } else if one_vector_only_solution_using_b.is_integer() {
+                println!(
+                    "only multiplying B by {:?}",
+                    one_vector_only_solution_using_b
+                );
+                Some(one_vector_only_solution_using_b)
+            } else {
+                None
+            }
         };
 
-        let one_vector_only_solution = Vecf2d(target.0 / v.0, target.1 / v.1);
-
-        if one_vector_only_solution.0.is_integer() && one_vector_only_solution.1.is_integer() {
-            println!("found 1v solution");
-            assert_eq!(v.s_mul(one_vector_only_solution.0), target);
-            Some(one_vector_only_solution.0)
+        if let Some(tokens) = min_tokens {
+            println!("=> {:?} tokens", tokens);
+            Some(tokens)
         } else {
+            println!("no solution");
             None
         }
     }
 
+    //first naive approach of just doing gaussian elim
     fn solve_p2(&self) -> Option<Decimal> {
         let mut mat = Mat2d(Vecf2d::from_vec2d(self.a), Vecf2d::from_vec2d(self.b)).transposed();
 
@@ -174,7 +256,7 @@ impl ClawProblem {
             mat.0, target.0, mat.1, target.1
         );
 
-        if !(target.0.is_integer() && target.1.is_integer()) {
+        if !(target.0.fract() < Decimal::new(1, 15) && target.1.fract() < Decimal::new(1, 15)) {
             None
         } else {
             let tokens = Decimal::from_u8(3).unwrap() * target.0 + target.1;
