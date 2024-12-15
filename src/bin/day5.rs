@@ -119,10 +119,10 @@ fn part2(rules: &Vec<Rules>, updates: &Vec<Vec<usize>>) -> usize {
             .into_iter()
             .filter(|Rules(l, r)| update.contains(l) && update.contains(r))
             .collect::<Vec<&Rules>>();
-        
+
         let mut middle = Option::None;
         let mut not_correct = false;
-        
+
         for (i, n) in update.iter().enumerate() {
             let mut found_before = Vec::new();
             let mut found_after = Vec::new();

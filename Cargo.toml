@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+cgmath = "0.18.0"
 clap = { version = "4.5.21", features = ["derive"] }
+image = "0.25.5"
 itertools = "0.13.0"
 num-bigint = "0.4.6"
 num-rational = "0.4.2"
