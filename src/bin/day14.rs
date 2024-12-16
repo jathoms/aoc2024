@@ -162,7 +162,7 @@ fn main() {
     println!("Part 1: {:?}", start.elapsed());
 
     start = time::Instant::now();
-    let part_2_result = part2_print(grid.clone());
+    let part_2_result = part2_nopar(grid.clone());
     println!("Part 2: {:?}", start.elapsed());
 
     println!("Part 1 result: {}", part_1_result);
@@ -221,7 +221,7 @@ fn part2_nopar(mut grid: RobotGrid) -> u32 {
 
     for i in 0..100000 {
         // println!("still largest {:?} at {:?}", largest, largest_index);
-        print!("{i}");
+        println!("{i}");
         grid.do_iteration();
         let region_size = grid.get_largest_contiguous_region() as u32;
         if largest < region_size {
@@ -237,7 +237,7 @@ fn part2_nopar(mut grid: RobotGrid) -> u32 {
     largest_index
 }
 
-fn part2_print(mut grid: RobotGrid) -> u32 {
+fn part2_print(mut grid: RobotGrid) {
     let mut img = ImageBuffer::new(grid.max_x as u32, grid.max_y as u32);
     for i in 0..10000000 {
         grid.do_iteration();
@@ -255,8 +255,5 @@ fn part2_print(mut grid: RobotGrid) -> u32 {
         println!("{}", i);
         
         image::save_buffer(format!("M:/repos/aoc2024/output/{}.png",i).as_str(), &img, grid.max_x as u32, grid.max_y as u32,image::ExtendedColorType::L8).expect("failed to save image");
-        
-        
     };
-    1
 }
