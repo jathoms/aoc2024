@@ -205,18 +205,6 @@ impl WarehousePart2 {
         let new_robot_pos = self.robot_position + dir.to_vec2();
         let new_robot_tile = self.tiles.get(&new_robot_pos);
 
-        // println!(
-        //     "movement vector: {:?}, takes our robot ({:?}) to {:?}",
-        //     dir.to_vec2(),
-        //     self.robot_position,
-        //     self.robot_position + dir.to_vec2()
-        // );
-        // println!(
-        //     "found next to robot: {:?} at {:?}",
-        //     new_robot_tile, new_robot_pos
-        // );
-        //
-
         match new_robot_tile {
             Some(WarehouseTilePart2::Free) => {
                 self.tiles
@@ -225,9 +213,8 @@ impl WarehousePart2 {
                 self.robot_position = new_robot_pos;
             }
             Some(WarehouseTilePart2::LeftBox) if dir == &Direction::Right => {
-                println!("1");
-                // if self.move_box(new_robot_pos + Direction::Right.to_vec2(), dir)
-                if self.move_box(new_robot_pos, dir) {
+                if self.can_move(new_robot_pos, dir) {
+                    self.move_box(new_robot_pos, dir);
                     self.tiles
                         .insert(self.robot_position, WarehouseTilePart2::Free);
                     self.tiles.insert(new_robot_pos, WarehouseTilePart2::Robot);
@@ -235,8 +222,6 @@ impl WarehousePart2 {
                 };
             }
             Some(WarehouseTilePart2::RightBox) if dir == &Direction::Left => {
-                println!("2");
-                // if self.move_box(new_robot_pos + Direction::Left.to_vec2(), dir)
                 if self.move_box(new_robot_pos, dir) {
                     self.tiles
                         .insert(self.robot_position, WarehouseTilePart2::Free);
@@ -244,25 +229,20 @@ impl WarehousePart2 {
                     self.robot_position = new_robot_pos;
                 };
             }
-            Some(WarehouseTilePart2::LeftBox) => {
-                println!("3");
-                if self.move_box(new_robot_pos + Direction::Right.to_vec2(), dir)
-                    && self.move_box(new_robot_pos, dir)
-                {
-                    self.tiles
-                        .insert(self.robot_position, WarehouseTilePart2::Free);
-                    self.tiles.insert(new_robot_pos, WarehouseTilePart2::Robot);
-                    self.robot_position = new_robot_pos;
+            Some(WarehouseTilePart2::LeftBox) | Some(WarehouseTilePart2::RightBox) => {
+                let other_side_offset = if new_robot_tile == Some(&WarehouseTilePart2::LeftBox) {
+                    Direction::Right.to_vec2()
+                } else {
+                    Direction::Left.to_vec2()
                 };
-            }
-            Some(WarehouseTilePart2::RightBox) => {
-                println!("4");
-                if self.move_box(new_robot_pos + Direction::Left.to_vec2(), dir)
-                    && self.move_box(new_robot_pos, dir)
-                {
+                let other_side_of_box_pos = new_robot_pos + other_side_offset;
+                if self.can_move(new_robot_pos, dir) && self.can_move(other_side_of_box_pos, dir) {
+                    self.naive_move(new_robot_pos, dir);
+                    self.naive_move(other_side_of_box_pos, dir);
                     self.tiles
                         .insert(self.robot_position, WarehouseTilePart2::Free);
                     self.tiles.insert(new_robot_pos, WarehouseTilePart2::Robot);
+
                     self.robot_position = new_robot_pos;
                 };
             }
@@ -275,30 +255,80 @@ impl WarehousePart2 {
         let next_tile = self.tiles.get(&next_pos);
         let this_tile = self.tiles.get(&from).unwrap().clone();
 
+        let this_box_other_side_offset = if this_tile == WarehouseTilePart2::LeftBox {
+            Direction::Right.to_vec2()
+        } else {
+            Direction::Left.to_vec2()
+        };
+        let this_box_other_tile = if this_tile == WarehouseTilePart2::LeftBox {
+            WarehouseTilePart2::RightBox
+        } else {
+            WarehouseTilePart2::LeftBox
+        };
+
+        let is_horizontal_move = dir == &Direction::Right || dir == &Direction::Left;
+
+        let other_box_other_side_offset = if next_tile == Some(&WarehouseTilePart2::LeftBox) {
+            Direction::Right.to_vec2()
+        } else {
+            Direction::Left.to_vec2()
+        };
+
+        let other_side_of_other_box_pos = next_pos + other_box_other_side_offset;
+
+        let other_box_tile = if next_tile == Some(&WarehouseTilePart2::LeftBox) {
+            WarehouseTilePart2::RightBox
+        } else {
+            WarehouseTilePart2::LeftBox
+        };
+
+        let beside_from = from + this_box_other_side_offset;
+
         assert!(
             this_tile == WarehouseTilePart2::LeftBox || this_tile == WarehouseTilePart2::RightBox
         );
-        if dir == &Direction::Up || dir == &Direction::Down {
-            match this_tile {
-                WarehouseTilePart2::LeftBox => {
-                    let diag_tile = self.tiles.get(&(next_pos + Direction::Right.to_vec2()));
-                    if !(diag_tile == Some(&WarehouseTilePart2::Free)
-                        || diag_tile == Some(&WarehouseTilePart2::RightBox))
+
+        match next_tile {
+            Some(WarehouseTilePart2::Free) => {
+                self.tiles.insert(from, WarehouseTilePart2::Free);
+                self.tiles.insert(beside_from, WarehouseTilePart2::Free);
+                self.tiles.insert(next_pos, this_tile);
+                self.tiles
+                    .insert(next_pos + this_box_other_side_offset, this_box_other_tile);
+                true
+            }
+            Some(WarehouseTilePart2::LeftBox) | Some(WarehouseTilePart2::RightBox) => {
+                if self.can_move(next_pos, dir)
+                    && (!is_horizontal_move || self.can_move(other_side_of_other_box_pos, dir))
+                {
+                    self.move_box(next_pos, dir);
+
+                    if !is_horizontal_move
+                        && other_box_other_side_offset != this_box_other_side_offset
                     {
-                        return false;
+                        self.move_box(next_pos + other_box_other_side_offset, dir);
                     }
+                    self.tiles.insert(from, WarehouseTilePart2::Free);
+                    self.tiles.insert(next_pos, this_tile);
+                    if !is_horizontal_move {
+                        self.tiles.insert(beside_from, WarehouseTilePart2::Free);
+                        self.tiles
+                            .insert(next_pos + this_box_other_side_offset, other_box_tile);
+                    };
+                    true
+                } else {
+                    false
                 }
-                WarehouseTilePart2::RightBox => {
-                    let diag_tile = self.tiles.get(&(next_pos + Direction::Left.to_vec2()));
-                    if !(diag_tile == Some(&WarehouseTilePart2::Free)
-                        || diag_tile == Some(&WarehouseTilePart2::LeftBox))
-                    {
-                        return false;
-                    }
-                }
-                _ => (),
-            };
+            }
+
+            _ => false,
         }
+    }
+
+    fn naive_move(&mut self, from: Vector2<i32>, dir: &Direction) -> bool {
+        let next_pos = from + dir.to_vec2();
+        let next_tile = self.tiles.get(&next_pos);
+        let this_tile = self.tiles.get(&from).unwrap().clone();
 
         match next_tile {
             Some(WarehouseTilePart2::Free) => {
@@ -306,144 +336,55 @@ impl WarehousePart2 {
                 self.tiles.insert(next_pos, this_tile);
                 true
             }
-            Some(WarehouseTilePart2::LeftBox) | Some(WarehouseTilePart2::RightBox) => {
-                if self.move_box(next_pos, dir) {
+            Some(WarehouseTilePart2::Wall) => false,
+            _ => {
+                let other_box_other_side_offset = if next_tile == Some(&WarehouseTilePart2::LeftBox)
+                {
+                    Direction::Right.to_vec2()
+                } else {
+                    Direction::Left.to_vec2()
+                };
+
+                let other_side_of_other_box_pos = next_pos + other_box_other_side_offset;
+                if self.can_move(next_pos, dir)
+                    && self.can_move(other_side_of_other_box_pos, dir)
+                    && self.naive_move(next_pos, dir)
+                    && self.naive_move(other_side_of_other_box_pos, dir)
+                {
+                    self.tiles.insert(from, WarehouseTilePart2::Free);
                     self.tiles.insert(next_pos, this_tile);
                     true
                 } else {
                     false
                 }
             }
-            _ => false,
         }
     }
-    fn move_box2(&mut self, from: Vector2<i32>, dir: &Direction) -> bool {
+
+    fn can_move(&self, from: Vector2<i32>, dir: &Direction) -> bool {
         let next_pos = from + dir.to_vec2();
         let next_tile = self.tiles.get(&next_pos);
-        let this_tile = self.tiles.get(&from).unwrap();
+        let this_tile = self.tiles.get(&from).unwrap().clone();
 
         assert!(
-            this_tile == &WarehouseTilePart2::LeftBox || this_tile == &WarehouseTilePart2::RightBox
+            this_tile == WarehouseTilePart2::LeftBox || this_tile == WarehouseTilePart2::RightBox
         );
 
-        if dir == &Direction::Up || dir == &Direction::Down {
-            match this_tile {
-                WarehouseTilePart2::LeftBox => {
-                    let diag_tile = self.tiles.get(&(next_pos + Direction::Right.to_vec2()));
-                    if !(diag_tile == Some(&WarehouseTilePart2::Free)
-                        || diag_tile == Some(&WarehouseTilePart2::RightBox))
-                    {
-                        return false;
-                    }
-                }
-                WarehouseTilePart2::RightBox => {
-                    let diag_tile = self.tiles.get(&(next_pos + Direction::Left.to_vec2()));
-                    if !(diag_tile == Some(&WarehouseTilePart2::Free)
-                        || diag_tile == Some(&WarehouseTilePart2::LeftBox))
-                    {
-                        return false;
-                    }
-                }
-                _ => (),
-            };
-        }
-
         match next_tile {
-            Some(WarehouseTilePart2::Free) if dir == &Direction::Left => {
-                println!("inserting {:?} to {:?}", this_tile, next_pos);
-                self.tiles.insert(next_pos, *this_tile);
-                println!("inserting {:?} to {:?}", WarehouseTilePart2::RightBox, from);
-                self.tiles.insert(from, WarehouseTilePart2::RightBox);
-                true
-            }
-            Some(WarehouseTilePart2::Free) if dir == &Direction::Right => {
-                println!("inserting {:?} to {:?}", this_tile, next_pos);
-                self.tiles.insert(next_pos, *this_tile);
-                println!("inserting {:?} to {:?}", WarehouseTilePart2::LeftBox, from);
-                self.tiles.insert(from, WarehouseTilePart2::LeftBox);
-                true
-            }
-            // Some(WarehouseTilePart2::LeftBox)
-            //     if this_tile == &WarehouseTilePart2::RightBox && dir == &Direction::Left =>
-            // {
-            //     if self.move_box(next_pos, dir) {
-            //         self.tiles.insert(next_pos, WarehouseTilePart2::LeftBox);
-            //         // self.tiles
-            //         //     .insert(next_pos + dir.to_vec2(), WarehouseTilePart2::RightBox);
-            //         true
-            //     } else {
-            //         false
-            //     }
-            // }
-            // Some(WarehouseTilePart2::RightBox)
-            //     if this_tile == &WarehouseTilePart2::LeftBox && dir == &Direction::Right =>
-            // {
-            //     if self.move_box(next_pos, dir) {
-            //         self.tiles.insert(next_pos, WarehouseTilePart2::RightBox);
-            //         // self.tiles
-            //         //     .insert(next_pos + dir.to_vec2(), WarehouseTilePart2::LeftBox);
-            //         true
-            //     } else {
-            //         false
-            //     }
-            // }
-            // Some(WarehouseTilePart2::LeftBox)
-            //     if dir == &Direction::Left && this_tile == &WarehouseTilePart2::RightBox =>
-            // {
-            //     if self.move_box(next_pos, dir) {
-            //         println!(
-            //             "!inserting {:?} to {:?}",
-            //             WarehouseTilePart2::LeftBox,
-            //             next_pos
-            //         );
-            //         self.tiles.insert(next_pos, WarehouseTilePart2::LeftBox);
-            //         self.tiles.insert(from, WarehouseTilePart2::RightBox);
-            //         true
-            //     } else {
-            //         false
-            //     }
-            // }
-            // Some(WarehouseTilePart2::RightBox)
-            //     if dir == &Direction::Right && this_tile == &WarehouseTilePart2::LeftBox =>
-            // {
-            //     if self.move_box(next_pos, dir) {
-            //         println!(
-            //             "!inserting {:?} to {:?}",
-            //             WarehouseTilePart2::RightBox,
-            //             next_pos
-            //         );
-            //         self.tiles.insert(next_pos, WarehouseTilePart2::RightBox);
-            //         self.tiles.insert(from, WarehouseTilePart2::LeftBox);
-            //         true
-            //     } else {
-            //         false
-            //     }
-            // }
-            Some(WarehouseTilePart2::LeftBox) => {
-                if self.move_box(next_pos, dir) {
-                    println!(
-                        "!inserting {:?} to {:?}",
-                        WarehouseTilePart2::LeftBox,
-                        next_pos
-                    );
-                    self.tiles.insert(next_pos, WarehouseTilePart2::LeftBox);
-                    true
+            Some(WarehouseTilePart2::Free) => true,
+            Some(WarehouseTilePart2::LeftBox) | Some(WarehouseTilePart2::RightBox)
+                if dir == &Direction::Up || dir == &Direction::Down =>
+            {
+                let other_side_offset = if next_tile == Some(&WarehouseTilePart2::LeftBox) {
+                    Direction::Right.to_vec2()
                 } else {
-                    false
-                }
+                    Direction::Left.to_vec2()
+                };
+                let other_side_of_box_pos = next_pos + other_side_offset;
+                self.can_move(next_pos, dir) && self.can_move(other_side_of_box_pos, dir)
             }
-            Some(WarehouseTilePart2::RightBox) => {
-                if self.move_box(next_pos, dir) {
-                    println!(
-                        "!inserting {:?} to {:?}",
-                        WarehouseTilePart2::RightBox,
-                        next_pos
-                    );
-                    self.tiles.insert(next_pos, WarehouseTilePart2::RightBox);
-                    true
-                } else {
-                    false
-                }
+            Some(WarehouseTilePart2::LeftBox) | Some(WarehouseTilePart2::RightBox) => {
+                self.can_move(next_pos, dir)
             }
             _ => false,
         }
@@ -559,32 +500,27 @@ fn part1(mut warehouse: Warehouse, moves: &Vec<Direction>) -> usize {
 fn get_gps_coord(v: Vector2<i32>) -> usize {
     (v.y as usize * 100) + v.x as usize
 }
-fn get_gps_coord_part_2(v: Vector2<i32>, max_x: i32) -> usize {
-    let (left_x, right_x) = (v.x, v.x + 1);
-    let r_dist_from_max_x = right_x.abs_diff(max_x);
-    let l_dist_from_min_x = left_x as u32;
-    let dist = if r_dist_from_max_x > l_dist_from_min_x {
-        l_dist_from_min_x
-    } else {
-        r_dist_from_max_x
-    };
-    (v.y as usize * 100) + dist as usize
-}
 
 fn part2(mut warehouse: WarehousePart2, moves: &Vec<Direction>) -> usize {
     println!("{}", warehouse.to_string());
     for robot_move in moves {
-        println!("move {:?}:", robot_move);
+        // println!("move {:?}:", robot_move);
         warehouse.do_move(robot_move);
-        println!("{}", warehouse.to_string());
+        // println!("{}", warehouse.to_string());
     }
+    println!("{}", warehouse.to_string());
 
     let max_x = warehouse.tiles.keys().max_by_key(|v| v.x).unwrap().x;
-    // let max_y = warehouse.tiles.keys().max_by_key(|v| v.y).unwrap().y;
+    let max_y = warehouse.tiles.keys().max_by_key(|v| v.y).unwrap().y;
+    println!("max x: {:?}, max y: {:?}", max_x, max_y);
     warehouse
         .tiles
         .iter()
         .filter(|(_, tile)| **tile == WarehouseTilePart2::LeftBox)
-        .map(|(&pos, _)| get_gps_coord_part_2(pos, max_x))
+        .map(|(&pos, _)| {
+            let n = get_gps_coord(pos);
+            println!("{:?}: {}", pos, n);
+            n
+        })
         .sum()
 }
